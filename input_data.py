@@ -134,8 +134,41 @@ class DataSet(object):
     end = self._index_in_epoch
     return self._images[start:end], self._labels[start:end]
 
+class SemiDataSet(object):
+    def __init__(self, images, labels, n_labeled):
+        self.n_labeled = n_labeled
 
-def read_data_sets(train_dir, fake_data=False, one_hot=False):
+        # Unlabled DataSet
+        self.unlabeled_ds = DataSet(images, labels)
+
+        # Labeled DataSet
+        self.num_examples = self.unlabeled_ds.num_examples
+        indices = numpy.arange(self.num_examples)
+        shuffled_indices = numpy.random.permutation(indices)
+        images = images[shuffled_indices]
+        labels = labels[shuffled_indices]
+        y = numpy.array([numpy.arange(10)[l==1][0] for l in labels])
+        idx = indices[y==0][:5]
+        n_classes = y.max() + 1
+        n_from_each_class = n_labeled / n_classes
+        i_labeled = []
+        for c in range(n_classes):
+            i = indices[y==c][:n_from_each_class]
+            i_labeled += list(i)
+        l_images = images[i_labeled]
+        l_labels = labels[i_labeled]
+        self.labeled_ds = DataSet(l_images, l_labels)
+
+    def next_batch(self, batch_size):
+        unlabeled_images, _ = self.unlabeled_ds.next_batch(batch_size)
+        if batch_size > self.n_labeled:
+            labeled_images, labels = self.labeled_ds.next_batch(self.n_labeled)
+        else:
+            labeled_images, labels = self.labeled_ds.next_batch(batch_size)
+        images = numpy.vstack([labeled_images, unlabeled_images])
+        return images, labels
+
+def read_data_sets(train_dir, n_labeled = 100, fake_data=False, one_hot=False):
   class DataSets(object):
     pass
   data_sets = DataSets()
@@ -150,7 +183,7 @@ def read_data_sets(train_dir, fake_data=False, one_hot=False):
   TRAIN_LABELS = 'train-labels-idx1-ubyte.gz'
   TEST_IMAGES = 't10k-images-idx3-ubyte.gz'
   TEST_LABELS = 't10k-labels-idx1-ubyte.gz'
-  VALIDATION_SIZE = 5000
+  VALIDATION_SIZE = 10000
 
   local_file = maybe_download(TRAIN_IMAGES, train_dir)
   train_images = extract_images(local_file)
@@ -169,7 +202,7 @@ def read_data_sets(train_dir, fake_data=False, one_hot=False):
   train_images = train_images[VALIDATION_SIZE:]
   train_labels = train_labels[VALIDATION_SIZE:]
 
-  data_sets.train = DataSet(train_images, train_labels)
+  data_sets.train = SemiDataSet(train_images, train_labels, n_labeled)
   data_sets.validation = DataSet(validation_images, validation_labels)
   data_sets.test = DataSet(test_images, test_labels)
 

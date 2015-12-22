@@ -7,10 +7,10 @@ layer_sizes = [784, 1000, 500, 250, 250, 250, 10]
 L = len(layer_sizes) - 1
 
 num_examples = 50000
-num_epochs = 10
+num_epochs = 150
 num_labeled = 100
 
-lr_decay = 0.5
+lr_decay = 0.67
 
 batch_size = 100
 num_iter = (num_examples/batch_size) * num_epochs
@@ -20,7 +20,6 @@ inputs = tf.placeholder(tf.float32, shape=(None, layer_sizes[0]))
 outputs = tf.placeholder(tf.float32)
 
 bi = lambda inits, size, name: inits * tf.Variable(tf.ones([size]), name=name)
-# wi = lambda shape, name: tf.Variable(tf.truncated_normal(shape, stddev = 1.0/math.sqrt(shape[0]), name=name))
 wi = lambda shape, name: tf.Variable(tf.random_normal(shape, name=name)) / math.sqrt(shape[0])
 
 shapes = zip(layer_sizes[:-1], layer_sizes[1:])
@@ -125,7 +124,6 @@ def g_gauss(z_c, u, size):
     z_est = (z_c - mu) * v + mu
     return z_est
 
-# u_cost = 0
 d_cost = []
 for l in range(L, -1, -1):
     print "Layer ", l, ": ", layer_sizes[l+1] if l+1 < len(layer_sizes) else None, " -> ", layer_sizes[l], ", denoising cost: ", denoising_cost[l]
@@ -138,17 +136,12 @@ for l in range(L, -1, -1):
     u = batch_normalization(u)
     z_est = g(z_c, u, layer_sizes[l])
     z_est_bn = batch_normalization(z_est, m, v)
-    # div = tf.to_float(tf.constant(layer_sizes[l]) * tf.shape(z)[0])
     d_cost.append((tf.reduce_mean(tf.reduce_sum(tf.square(z_est_bn - z), 1)) / layer_sizes[l]) * denoising_cost[l])
-    # print layer_sizes[l], denoising_cost[l]
 
-# exit()
 u_cost = tf.add_n(d_cost)
 
 y_N = labeled(y_c)
-# cross_entropy = tf.nn.softmax_cross_entropy_with_logits(y_N, outputs, name='xentropy')
 cost = -tf.reduce_sum(outputs*tf.log(y_N)) / batch_size
-# cost = tf.reduce_mean(cross_entropy, name='xentropy_mean')
 loss = cost + u_cost
 
 pred_cost = -tf.reduce_sum(outputs*tf.log(y)) / batch_size
@@ -158,9 +151,7 @@ accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float")) * tf.constant(10
 
 global_step = tf.Variable(0, trainable=False)
 starter_learning_rate = 0.002
-# learning_rate = tf.train.exponential_decay(starter_learning_rate, global_step, num_iter/num_epochs, 0.99, staircase=True)
 learning_rate = tf.Variable(0.002, trainable=False)
-# train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss, global_step=global_step)
 train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss)
 
 bn_updates = tf.group(*bn_assigns)
@@ -184,10 +175,6 @@ if continue_training:
     else:
         init  = tf.initialize_all_variables()
         sess.run(init)
-
-# images, labels = mnist.train.next_batch(batch_size)
-# print sess.run(a, feed_dict={inputs: images, outputs: labels})
-# exit()
 
 print "Initial Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels}), "%"
 

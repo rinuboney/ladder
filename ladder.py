@@ -152,7 +152,8 @@ correct_prediction = tf.equal(tf.argmax(y, 1), tf.argmax(outputs, 1))
 accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float")) * tf.constant(100.0)
 
 global_step = tf.Variable(0, trainable=False)
-learning_rate = tf.Variable(0.002, trainable=False)
+starter_learning_rate = 0.002
+learning_rate = tf.Variable(starter_learning_rate, trainable=False)
 train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss)
 
 bn_updates = tf.group(*bn_assigns)
@@ -176,7 +177,8 @@ if continue_training:
         i_iter = (epoch_n + 1) * (num_examples/batch_size)
         print "Restored Epoch ", epoch_n
     else:
-        os.makedirs('checkpoints')
+	if not os.path.exists('checkpoints'):
+            os.makedirs('checkpoints')
         init  = tf.initialize_all_variables()
         sess.run(init)
 
@@ -192,7 +194,7 @@ for i in tqdm(range(i_iter, num_iter)):
         if epoch_n >= lr_decay*num_epochs:
             ratio = 1.0 * (num_epochs - epoch_n)
             ratio = max(0, ratio / (num_epochs - lr_decay*num_epochs))
-            learning_rate = learning_rate * ratio
+            sess.run(learning_rate.assign(starter_learning_rate * ratio))
         saver.save(sess, 'checkpoints/model.ckpt', epoch_n)
         # print "Epoch ", epoch_n, ", Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs:mnist.test.labels}), "%"
 

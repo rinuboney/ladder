@@ -1,6 +1,7 @@
 import tensorflow as tf
 import input_data
 import math
+import os
 from tqdm import tqdm
 
 layer_sizes = [784, 1000, 500, 250, 250, 250, 10]
@@ -175,8 +176,10 @@ if continue_training:
         i_iter = (epoch_n + 1) * (num_examples/batch_size)
         print "Restored Epoch ", epoch_n
     else:
+        os.makedirs('checkpoints')
         init  = tf.initialize_all_variables()
         sess.run(init)
+
 
 print "=== Training ==="
 print "Initial Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels}), "%"

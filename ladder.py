@@ -1,12 +1,13 @@
 import tensorflow as tf
 import input_data
 import math
+from tqdm import tqdm
 
 layer_sizes = [784, 1000, 500, 250, 250, 250, 10]
 
 L = len(layer_sizes) - 1
 
-num_examples = 50000
+num_examples = 60000
 num_epochs = 150
 num_labeled = 100
 
@@ -19,7 +20,7 @@ continue_training = True
 inputs = tf.placeholder(tf.float32, shape=(None, layer_sizes[0]))
 outputs = tf.placeholder(tf.float32)
 
-bi = lambda inits, size, name: inits * tf.Variable(tf.ones([size]), name=name)
+bi = lambda inits, size, name: tf.Variable(inits * tf.ones([size]), name=name)
 wi = lambda shape, name: tf.Variable(tf.random_normal(shape, name=name)) / math.sqrt(shape[0])
 
 shapes = zip(layer_sizes[:-1], layer_sizes[1:])
@@ -66,8 +67,7 @@ def encoder(inputs, noise_std):
     d = {}
     d['labeled'] = {'z': {}, 'm': {}, 'v': {}, 'h': {}}
     d['unlabeled'] = {'z': {}, 'm': {}, 'v': {}, 'h': {}}
-    d['labeled']['z'][0] = labeled(h)
-    d['unlabeled']['z'][0] = unlabeled(h)
+    d['labeled']['z'][0], d['unlabeled']['z'][0] = split_lu(h)
     for l in range(1, L+1):
         print "Layer ", l, ": ", layer_sizes[l-1], " -> ", layer_sizes[l]
         d['labeled']['h'][l-1], d['unlabeled']['h'][l-1] = split_lu(h)
@@ -77,13 +77,13 @@ def encoder(inputs, noise_std):
         m_l, v_l = tf.nn.moments(z_pre_l, axes=[0])
         if noise_std > 0:
             z = join(batch_normalization(z_pre_l, m_l, v_l), batch_normalization(z_pre_u, m, v))
+            z += tf.random_normal(tf.shape(z_pre)) * noise_std
         else:
             z = join(update_batch_normalization(z_pre_l, m_l, v_l, l), batch_normalization(z_pre_u, m, v))
-        z += tf.random_normal(tf.shape(z_pre)) * noise_std
-        if l != L:
-            h = tf.nn.relu(z + weights["beta"][l-1])
-        else:
+        if l == L:
             h = tf.nn.softmax(weights['gamma'][l-1] * (z + weights["beta"][l-1]))
+        else:
+            h = tf.nn.relu(z + weights["beta"][l-1])
         d['labeled']['z'][l], d['unlabeled']['z'][l] = split_lu(z)
         d['unlabeled']['m'][l], d['unlabeled']['v'][l] = m, v
     d['labeled']['h'][l], d['unlabeled']['h'][l] = split_lu(h)
@@ -98,14 +98,14 @@ y, clean = encoder(inputs, 0.0)
 print "=== Decoder ==="
 
 def g(z_c, u, size):
-    wi = lambda inits, name: inits * tf.Variable(tf.ones([size]), name=name)
+    wi = lambda inits, name: tf.Variable(inits * tf.ones([size]), name=name)
     sigval = wi(0.0, 'c1') + wi(1.0, 'c2') * z_c + wi(0.0, 'c3') * u + wi(0.0, 'c4') * z_c * u
     sigval = tf.sigmoid(sigval)
     z_est = wi(0.0, 'a1') + wi(1.0, 'a2') * z_c + wi(0.0, 'a3') * u + wi(0.0, 'a4') * z_c * u + wi(1.0, 'b1') * sigval
     return z_est
 
 def g_gauss(z_c, u, size):
-    wi = lambda inits, name: inits * tf.Variable(tf.ones([size]), name=name)
+    wi = lambda inits, name: tf.Variable(inits * tf.ones([size]), name=name)
     a1 = wi(0., 'a1')
     a2 = wi(1., 'a2')
     a3 = wi(0., 'a3')
@@ -124,18 +124,19 @@ def g_gauss(z_c, u, size):
     z_est = (z_c - mu) * v + mu
     return z_est
 
+z_est = {}
 d_cost = []
 for l in range(L, -1, -1):
     print "Layer ", l, ": ", layer_sizes[l+1] if l+1 < len(layer_sizes) else None, " -> ", layer_sizes[l], ", denoising cost: ", denoising_cost[l]
     z, z_c = clean['unlabeled']['z'][l], corr['unlabeled']['z'][l]
-    m, v = clean['unlabeled']['m'].get(l, 0), clean['unlabeled']['v'].get(l, 1)
+    m, v = clean['unlabeled']['m'].get(l, 0), clean['unlabeled']['v'].get(l, 1-1e-10)
     if l == L:
         u = unlabeled(y_c)
     else:
-        u = tf.matmul(z_est, weights['V'][l])
+        u = tf.matmul(z_est[l+1], weights['V'][l])
     u = batch_normalization(u)
-    z_est = g(z_c, u, layer_sizes[l])
-    z_est_bn = batch_normalization(z_est, m, v)
+    z_est[l] = g_gauss(z_c, u, layer_sizes[l])
+    z_est_bn = (z_est[l] - m) / v
     d_cost.append((tf.reduce_mean(tf.reduce_sum(tf.square(z_est_bn - z), 1)) / layer_sizes[l]) * denoising_cost[l])
 
 u_cost = tf.add_n(d_cost)
@@ -150,7 +151,6 @@ correct_prediction = tf.equal(tf.argmax(y, 1), tf.argmax(outputs, 1))
 accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float")) * tf.constant(100.0)
 
 global_step = tf.Variable(0, trainable=False)
-starter_learning_rate = 0.002
 learning_rate = tf.Variable(0.002, trainable=False)
 train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss)
 
@@ -158,10 +158,12 @@ bn_updates = tf.group(*bn_assigns)
 with tf.control_dependencies([train_step]):
     train_step = tf.group(bn_updates)
 
+print "===  Loading Data ==="
 mnist = input_data.read_data_sets("MNIST_data", n_labeled = num_labeled, one_hot=True)
 
 saver = tf.train.Saver()
 
+print "===  Starting Session ==="
 sess = tf.Session()
 
 i_iter = 0
@@ -176,15 +178,12 @@ if continue_training:
         init  = tf.initialize_all_variables()
         sess.run(init)
 
+print "=== Training ==="
 print "Initial Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels}), "%"
 
-print "loss: ", sess.run([accuracy, pred_cost] + d_cost, feed_dict={inputs: mnist.validation.images, outputs: mnist.validation.labels})
-
-for i in range(i_iter, num_iter):
+for i in tqdm(range(i_iter, num_iter)):
     images, labels = mnist.train.next_batch(batch_size)
     sess.run(train_step, feed_dict={inputs: images, outputs: labels})
-    if i % ((num_examples/10000)*num_epochs) == 0:
-        print i/((num_examples/10000)*num_epochs), "%"
     if (i > 1) and (i % (num_iter/num_epochs) == 0):
         epoch_n = i/(num_examples/batch_size)
         if epoch_n >= lr_decay*num_epochs:
@@ -192,10 +191,7 @@ for i in range(i_iter, num_iter):
             ratio = max(0, ratio / (num_epochs - lr_decay*num_epochs))
             learning_rate = learning_rate * ratio
         saver.save(sess, 'checkpoints/model.ckpt', epoch_n)
-        print "Epoch ", epoch_n, ", Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.validation.images, outputs: mnist.validation.labels}), "%"
-        print "i: ", i, ", loss: ", sess.run([accuracy, pred_cost] + d_cost, feed_dict={inputs: mnist.validation.images, outputs: mnist.validation.labels})
-
-print "loss: ", sess.run([accuracy, pred_cost] + d_cost, feed_dict={inputs: mnist.validation.images, outputs: mnist.validation.labels})
+        # print "Epoch ", epoch_n, ", Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs:mnist.test.labels}), "%"
 
 print "Final Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels}), "%"
 

@@ -40,6 +40,8 @@ labeled = lambda x: tf.slice(x, [0, 0], [batch_size, -1]) if x is not None else 
 unlabeled = lambda x: tf.slice(x, [batch_size, 0], [-1, -1]) if x is not None else x
 split_lu = lambda x: (labeled(x), unlabeled(x))
 
+training = tf.placeholder(tf.bool)
+
 ewma = tf.train.ExponentialMovingAverage(decay=0.99)
 bn_assigns = []
 
@@ -51,18 +53,19 @@ def batch_normalization(batch, mean=None, var=None):
 running_mean = [tf.Variable(tf.constant(0.0, shape=[l]), trainable=False) for l in layer_sizes[1:]]
 running_var = [tf.Variable(tf.constant(1.0, shape=[l]), trainable=False) for l in layer_sizes[1:]]
 
-def update_batch_normalization(batch, mean, var, l):
-    assign_mean = running_mean[l-1].assign(mean)
-    assign_var = running_var[l-1].assign(var)
-    avg_mean = ewma.average(running_mean[l-1])
-    avg_var = ewma.average(running_var[l-1])
-    bn_assigns.append(ewma.apply([running_mean[l-1], running_var[l-1]]))
-    with tf.control_dependencies([assign_mean, assign_var]):
-        if avg_mean and avg_var:
-            return (batch - avg_mean) / tf.sqrt(avg_var + 1e-10)
-        else:
+def update_batch_normalization(batch, l):
+    if training:
+    	mean, var = tf.nn.moments(batch, axes=[0])
+        assign_mean = running_mean[l-1].assign(mean)
+        assign_var = running_var[l-1].assign(var)
+        bn_assigns.append(ewma.apply([running_mean[l-1], running_var[l-1]]))
+        with tf.control_dependencies([assign_mean, assign_var]):
             return (batch - mean) / tf.sqrt(var + 1e-10)
-
+    else:
+    	mean = ewma.average(running_mean[l-1])
+    	var = ewma.average(running_var[l-1])
+        return (batch - mean) / tf.sqrt(var + 1e-10)
+    
 def encoder(inputs, noise_std):
     h = inputs + tf.random_normal(tf.shape(inputs)) * noise_std
     d = {}
@@ -75,12 +78,13 @@ def encoder(inputs, noise_std):
         z_pre = tf.matmul(h, weights['W'][l-1])
         z_pre_l, z_pre_u = split_lu(z_pre)
         m, v = tf.nn.moments(z_pre_u, axes=[0])
-        m_l, v_l = tf.nn.moments(z_pre_l, axes=[0])
-        if noise_std > 0:
-            z = join(batch_normalization(z_pre_l, m_l, v_l), batch_normalization(z_pre_u, m, v))
+        if noise_std > 0: 
+            # Corrupted
+            z = join(batch_normalization(z_pre_l), batch_normalization(z_pre_u, m, v))
             z += tf.random_normal(tf.shape(z_pre)) * noise_std
-        else:
-            z = join(update_batch_normalization(z_pre_l, m_l, v_l, l), batch_normalization(z_pre_u, m, v))
+        else: 
+            # Clean
+            z = join(update_batch_normalization(z_pre_l, l), batch_normalization(z_pre_u, m, v))
         if l == L:
             h = tf.nn.softmax(weights['gamma'][l-1] * (z + weights["beta"][l-1]))
         else:
@@ -184,11 +188,11 @@ if continue_training:
 
 
 print "=== Training ==="
-print "Initial Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels}), "%"
+print "Initial Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels, training: False}), "%"
 
 for i in tqdm(range(i_iter, num_iter)):
     images, labels = mnist.train.next_batch(batch_size)
-    sess.run(train_step, feed_dict={inputs: images, outputs: labels})
+    sess.run(train_step, feed_dict={inputs: images, outputs: labels, training: True})
     if (i > 1) and (i % (num_iter/num_epochs) == 0):
         epoch_n = i/(num_examples/batch_size)
         if epoch_n >= lr_decay*num_epochs:
@@ -196,8 +200,8 @@ for i in tqdm(range(i_iter, num_iter)):
             ratio = max(0, ratio / (num_epochs - lr_decay*num_epochs))
             sess.run(learning_rate.assign(starter_learning_rate * ratio))
         saver.save(sess, 'checkpoints/model.ckpt', epoch_n)
-        # print "Epoch ", epoch_n, ", Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs:mnist.test.labels}), "%"
+        # print "Epoch ", epoch_n, ", Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs:mnist.test.labels, training: False}), "%"
 
-print "Final Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels}), "%"
+print "Final Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels, training: False}), "%"
 
 sess.close()

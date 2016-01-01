@@ -2,6 +2,7 @@ import tensorflow as tf
 import input_data
 import math
 import os
+import csv
 from tqdm import tqdm
 
 layer_sizes = [784, 1000, 500, 250, 250, 250, 10]
@@ -178,7 +179,7 @@ if continue_training:
     if ckpt and ckpt.model_checkpoint_path:
         saver.restore(sess, ckpt.model_checkpoint_path)
         epoch_n = int(ckpt.model_checkpoint_path.split('-')[1])
-        i_iter = (epoch_n + 1) * (num_examples/batch_size)
+        i_iter = (epoch_n+1) * (num_examples/batch_size)
         print "Restored Epoch ", epoch_n
     else:
 	if not os.path.exists('checkpoints'):
@@ -186,6 +187,8 @@ if continue_training:
         init  = tf.initialize_all_variables()
         sess.run(init)
 
+train_log = open('train_log', 'ab')
+train_log_w = csv.writer(train_log)
 
 print "=== Training ==="
 print "Initial Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels, training: False}), "%"
@@ -193,7 +196,7 @@ print "Initial Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.ima
 for i in tqdm(range(i_iter, num_iter)):
     images, labels = mnist.train.next_batch(batch_size)
     sess.run(train_step, feed_dict={inputs: images, outputs: labels, training: True})
-    if (i > 1) and (i % (num_iter/num_epochs) == 0):
+    if (i > 1) and ((i+1) % (num_iter/num_epochs) == 0):
         epoch_n = i/(num_examples/batch_size)
         if epoch_n >= lr_decay*num_epochs:
             ratio = 1.0 * (num_epochs - epoch_n)
@@ -201,7 +204,10 @@ for i in tqdm(range(i_iter, num_iter)):
             sess.run(learning_rate.assign(starter_learning_rate * ratio))
         saver.save(sess, 'checkpoints/model.ckpt', epoch_n)
         # print "Epoch ", epoch_n, ", Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs:mnist.test.labels, training: False}), "%"
+	log_i = [epoch_n] + sess.run([accuracy], feed_dict={inputs: mnist.test.images, outputs:mnist.test.labels, training: False})
+        train_log_w.writerow(log_i)
 
 print "Final Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels, training: False}), "%"
 
+train_log.close()
 sess.close()

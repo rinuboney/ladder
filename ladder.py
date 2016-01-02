@@ -55,18 +55,13 @@ running_mean = [tf.Variable(tf.constant(0.0, shape=[l]), trainable=False) for l 
 running_var = [tf.Variable(tf.constant(1.0, shape=[l]), trainable=False) for l in layer_sizes[1:]]
 
 def update_batch_normalization(batch, l):
-    if training:
-    	mean, var = tf.nn.moments(batch, axes=[0])
-        assign_mean = running_mean[l-1].assign(mean)
-        assign_var = running_var[l-1].assign(var)
-        bn_assigns.append(ewma.apply([running_mean[l-1], running_var[l-1]]))
-        with tf.control_dependencies([assign_mean, assign_var]):
-            return (batch - mean) / tf.sqrt(var + 1e-10)
-    else:
-    	mean = ewma.average(running_mean[l-1])
-    	var = ewma.average(running_var[l-1])
+    mean, var = tf.nn.moments(batch, axes=[0])
+    assign_mean = running_mean[l-1].assign(mean)
+    assign_var = running_var[l-1].assign(var)
+    bn_assigns.append(ewma.apply([running_mean[l-1], running_var[l-1]]))
+    with tf.control_dependencies([assign_mean, assign_var]):
         return (batch - mean) / tf.sqrt(var + 1e-10)
-    
+
 def encoder(inputs, noise_std):
     h = inputs + tf.random_normal(tf.shape(inputs)) * noise_std
     d = {}
@@ -78,14 +73,21 @@ def encoder(inputs, noise_std):
         d['labeled']['h'][l-1], d['unlabeled']['h'][l-1] = split_lu(h)
         z_pre = tf.matmul(h, weights['W'][l-1])
         z_pre_l, z_pre_u = split_lu(z_pre)
-        m, v = tf.nn.moments(z_pre_u, axes=[0])
-        if noise_std > 0: 
-            # Corrupted
-            z = join(batch_normalization(z_pre_l), batch_normalization(z_pre_u, m, v))
-            z += tf.random_normal(tf.shape(z_pre)) * noise_std
-        else: 
-            # Clean
-            z = join(update_batch_normalization(z_pre_l, l), batch_normalization(z_pre_u, m, v))
+        if training:
+            m, v = tf.nn.moments(z_pre_u, axes=[0])
+            # Training
+            if noise_std > 0:
+                # Corrupted
+                z = join(batch_normalization(z_pre_l), batch_normalization(z_pre_u, m, v))
+                z += tf.random_normal(tf.shape(z_pre)) * noise_std
+            else:
+                # Clean
+                z = join(update_batch_normalization(z_pre_l, l), batch_normalization(z_pre_u, m, v))
+	else:
+            # Evaluation
+    	    mean = ewma.average(running_mean[l-1])
+    	    var = ewma.average(running_var[l-1])
+            z = join(batch_normalization(z_pre_l, mean, var), batch_normalization(z_pre_u, mean, var))
         if l == L:
             h = tf.nn.softmax(weights['gamma'][l-1] * (z + weights["beta"][l-1]))
         else:

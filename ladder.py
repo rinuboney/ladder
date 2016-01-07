@@ -153,7 +153,7 @@ y_N = labeled(y_c)
 cost = -tf.reduce_sum(outputs*tf.log(y_N)) / batch_size
 loss = cost + u_cost
 
-pred_cost = -tf.reduce_sum(outputs*tf.log(y)) / batch_size
+pred_cost = -tf.reduce_sum(outputs*tf.log(y)) / tf.to_float(tf.shape(y_N)[0])
 
 correct_prediction = tf.equal(tf.argmax(y, 1), tf.argmax(outputs, 1))
 accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float")) * tf.constant(100.0)
@@ -200,8 +200,8 @@ for i in tqdm(range(i_iter, num_iter)):
     sess.run(train_step, feed_dict={inputs: images, outputs: labels, training: True})
     if (i > 1) and ((i+1) % (num_iter/num_epochs) == 0):
         epoch_n = i/(num_examples/batch_size)
-        if epoch_n >= lr_decay*num_epochs:
-            ratio = 1.0 * (num_epochs - epoch_n)
+        if (epoch_n+1) >= lr_decay*num_epochs:
+            ratio = 1.0 * (num_epochs - (epoch_n+1))
             ratio = max(0, ratio / (num_epochs - lr_decay*num_epochs))
             sess.run(learning_rate.assign(starter_learning_rate * ratio))
         saver.save(sess, 'checkpoints/model.ckpt', epoch_n)

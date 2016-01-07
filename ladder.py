@@ -150,10 +150,10 @@ for l in range(L, -1, -1):
 u_cost = tf.add_n(d_cost)
 
 y_N = labeled(y_c)
-cost = -tf.reduce_sum(outputs*tf.log(y_N)) / batch_size
+cost = -tf.reduce_mean(tf.reduce_sum(outputs*tf.log(y_N), 1))
 loss = cost + u_cost
 
-pred_cost = -tf.reduce_sum(outputs*tf.log(y)) / tf.to_float(tf.shape(y_N)[0])
+pred_cost = -tf.reduce_mean(tf.reduce_sum(outputs*tf.log(y), 1))
 
 correct_prediction = tf.equal(tf.argmax(y, 1), tf.argmax(outputs, 1))
 accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float")) * tf.constant(100.0)

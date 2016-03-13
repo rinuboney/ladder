@@ -1,4 +1,5 @@
 import tensorflow as tf
+from tensorflow.python import control_flow_ops
 import input_data
 import math
 import os
@@ -77,10 +78,12 @@ def encoder(inputs, noise_std):
         d['labeled']['h'][l-1], d['unlabeled']['h'][l-1] = split_lu(h)
         z_pre = tf.matmul(h, weights['W'][l-1]) # pre-activation
         z_pre_l, z_pre_u = split_lu(z_pre) # split labeled and unlabeled examples
-        if training:
-            # Training
+
+        m, v = tf.nn.moments(z_pre_u, axes=[0])
+        #if training:
+        def training_batch_norm():
+            # Training batch normalization
             # batch normalization for labeled and unlabeled examples is performed separately
-            m, v = tf.nn.moments(z_pre_u, axes=[0])
             if noise_std > 0:
                 # Corrupted encoder
                 # batch normalization + noise
@@ -90,8 +93,10 @@ def encoder(inputs, noise_std):
                 # Clean encoder
                 # batch normalization + update the average mean and variance using batch mean and variance of labeled examples
                 z = join(update_batch_normalization(z_pre_l, l), batch_normalization(z_pre_u, m, v))
-	else:
-            # Evaluation
+            return z
+	#else:
+        def eval_batch_norm():
+            # Evaluation batch normalization
             # obtain average mean and variance and use it to normalize the batch
     	    mean = ewma.average(running_mean[l-1])
     	    var = ewma.average(running_var[l-1])
@@ -100,6 +105,10 @@ def encoder(inputs, noise_std):
             # consistently produces a 0.2% higher accuracy for unclear reasons.
             # m_l, v_l = tf.nn.moments(z_pre_l, axes=[0])
             # z = join(batch_normalization(z_pre_l, m_l, mean, var), batch_normalization(z_pre_u, mean, var))
+            return z
+        # perform batch normalization according to value of boolean "training" placeholder:
+        z = control_flow_ops.cond(training, training_batch_norm, eval_batch_norm)
+       
         if l == L:
             # use softmax activation in output layer
             h = tf.nn.softmax(weights['gamma'][l-1] * (z + weights["beta"][l-1]))

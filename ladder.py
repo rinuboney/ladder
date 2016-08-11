@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 layer_sizes = [784, 1000, 500, 250, 250, 250, 10]
 
-L = len(layer_sizes) - 1 # number of layers
+L = len(layer_sizes) - 1  # number of layers
 
 num_examples = 60000
 num_epochs = 150
@@ -16,27 +16,35 @@ num_labeled = 100
 
 starter_learning_rate = 0.02
 
-decay_after = 15 # epoch after which to begin learning rate decay
+decay_after = 15  # epoch after which to begin learning rate decay
 
 batch_size = 100
-num_iter = (num_examples/batch_size) * num_epochs # number of loop iterations
+num_iter = (num_examples/batch_size) * num_epochs  # number of loop iterations
 
 inputs = tf.placeholder(tf.float32, shape=(None, layer_sizes[0]))
 outputs = tf.placeholder(tf.float32)
 
-bi = lambda inits, size, name: tf.Variable(inits * tf.ones([size]), name=name)
-wi = lambda shape, name: tf.Variable(tf.random_normal(shape, name=name)) / math.sqrt(shape[0])
 
-shapes = zip(layer_sizes[:-1], layer_sizes[1:]) # shapes of linear layers
+def bi(inits, size, name):
+    return tf.Variable(inits * tf.ones([size]), name=name)
 
-weights = {'W': [wi(s, "W") for s in shapes], # Encoder weights
-           'V': [wi(s[::-1], "V") for s in shapes], # Decoder weights
-           'beta': [bi(0.0, layer_sizes[l+1], "beta") for l in range(L)], # batch normalization parameter to shift the normalized value
-           'gamma': [bi(1.0, layer_sizes[l+1], "beta") for l in range(L)]} # batch normalization parameter to scale the normalized value
 
-noise_std = 0.3 # scaling factor for noise used in corrupted encoder
+def wi(shape, name):
+    return tf.Variable(tf.random_normal(shape, name=name)) / math.sqrt(shape[0])
 
-denoising_cost = [1000.0, 10.0, 0.10, 0.10, 0.10, 0.10, 0.10] # hyperparameters that denote the importance of each layer
+shapes = zip(layer_sizes[:-1], layer_sizes[1:])  # shapes of linear layers
+
+weights = {'W': [wi(s, "W") for s in shapes],  # Encoder weights
+           'V': [wi(s[::-1], "V") for s in shapes],  # Decoder weights
+           # batch normalization parameter to shift the normalized value
+           'beta': [bi(0.0, layer_sizes[l+1], "beta") for l in range(L)],
+           # batch normalization parameter to scale the normalized value
+           'gamma': [bi(1.0, layer_sizes[l+1], "beta") for l in range(L)]}
+
+noise_std = 0.3  # scaling factor for noise used in corrupted encoder
+
+# hyperparameters that denote the importance of each layer
+denoising_cost = [1000.0, 10.0, 0.10, 0.10, 0.10, 0.10, 0.10]
 
 join = lambda l, u: tf.concat(0, [l, u])
 labeled = lambda x: tf.slice(x, [0, 0], [batch_size, -1]) if x is not None else x
@@ -45,17 +53,19 @@ split_lu = lambda x: (labeled(x), unlabeled(x))
 
 training = tf.placeholder(tf.bool)
 
-ewma = tf.train.ExponentialMovingAverage(decay=0.99) # to calculate the moving averages of mean and variance
-bn_assigns = [] # this list stores the updates to be made to average mean and variance
+ewma = tf.train.ExponentialMovingAverage(decay=0.99)  # to calculate the moving averages of mean and variance
+bn_assigns = []  # this list stores the updates to be made to average mean and variance
+
 
 def batch_normalization(batch, mean=None, var=None):
-    if mean == None or var == None:
+    if mean is None or var is None:
         mean, var = tf.nn.moments(batch, axes=[0])
     return (batch - mean) / tf.sqrt(var + tf.constant(1e-10))
 
 # average mean and variance of all layers
 running_mean = [tf.Variable(tf.constant(0.0, shape=[l]), trainable=False) for l in layer_sizes[1:]]
 running_var = [tf.Variable(tf.constant(1.0, shape=[l]), trainable=False) for l in layer_sizes[1:]]
+
 
 def update_batch_normalization(batch, l):
     "batch normalize + update average mean and variance of layer l"
@@ -66,9 +76,10 @@ def update_batch_normalization(batch, l):
     with tf.control_dependencies([assign_mean, assign_var]):
         return (batch - mean) / tf.sqrt(var + 1e-10)
 
+
 def encoder(inputs, noise_std):
-    h = inputs + tf.random_normal(tf.shape(inputs)) * noise_std # add noise to input
-    d = {} # to store the pre-activation, activation, mean and variance for each layer
+    h = inputs + tf.random_normal(tf.shape(inputs)) * noise_std  # add noise to input
+    d = {}  # to store the pre-activation, activation, mean and variance for each layer
     # The data for labeled and unlabeled examples are stored separately
     d['labeled'] = {'z': {}, 'm': {}, 'v': {}, 'h': {}}
     d['unlabeled'] = {'z': {}, 'm': {}, 'v': {}, 'h': {}}
@@ -76,11 +87,12 @@ def encoder(inputs, noise_std):
     for l in range(1, L+1):
         print "Layer ", l, ": ", layer_sizes[l-1], " -> ", layer_sizes[l]
         d['labeled']['h'][l-1], d['unlabeled']['h'][l-1] = split_lu(h)
-        z_pre = tf.matmul(h, weights['W'][l-1]) # pre-activation
-        z_pre_l, z_pre_u = split_lu(z_pre) # split labeled and unlabeled examples
+        z_pre = tf.matmul(h, weights['W'][l-1])  # pre-activation
+        z_pre_l, z_pre_u = split_lu(z_pre)  # split labeled and unlabeled examples
 
         m, v = tf.nn.moments(z_pre_u, axes=[0])
-        #if training:
+
+        # if training:
         def training_batch_norm():
             # Training batch normalization
             # batch normalization for labeled and unlabeled examples is performed separately
@@ -94,21 +106,23 @@ def encoder(inputs, noise_std):
                 # batch normalization + update the average mean and variance using batch mean and variance of labeled examples
                 z = join(update_batch_normalization(z_pre_l, l), batch_normalization(z_pre_u, m, v))
             return z
-	#else:
+
+        # else:
         def eval_batch_norm():
             # Evaluation batch normalization
             # obtain average mean and variance and use it to normalize the batch
-    	    mean = ewma.average(running_mean[l-1])
-    	    var = ewma.average(running_var[l-1])
+            mean = ewma.average(running_mean[l-1])
+            var = ewma.average(running_var[l-1])
             z = batch_normalization(z_pre, mean, var)
-            # Instead of the above statement, the use of the following 2 statements containing a typo 
+            # Instead of the above statement, the use of the following 2 statements containing a typo
             # consistently produces a 0.2% higher accuracy for unclear reasons.
             # m_l, v_l = tf.nn.moments(z_pre_l, axes=[0])
             # z = join(batch_normalization(z_pre_l, m_l, mean, var), batch_normalization(z_pre_u, mean, var))
             return z
+
         # perform batch normalization according to value of boolean "training" placeholder:
         z = control_flow_ops.cond(training, training_batch_norm, eval_batch_norm)
-       
+
         if l == L:
             # use softmax activation in output layer
             h = tf.nn.softmax(weights['gamma'][l-1] * (z + weights["beta"][l-1]))
@@ -116,7 +130,7 @@ def encoder(inputs, noise_std):
             # use ReLU activation in hidden layers
             h = tf.nn.relu(z + weights["beta"][l-1])
         d['labeled']['z'][l], d['unlabeled']['z'][l] = split_lu(z)
-        d['unlabeled']['m'][l], d['unlabeled']['v'][l] = m, v # save mean and variance of unlabeled examples for decoding
+        d['unlabeled']['m'][l], d['unlabeled']['v'][l] = m, v  # save mean and variance of unlabeled examples for decoding
     d['labeled']['h'][l], d['unlabeled']['h'][l] = split_lu(h)
     return h, d
 
@@ -124,9 +138,10 @@ print "=== Corrupted Encoder ==="
 y_c, corr = encoder(inputs, noise_std)
 
 print "=== Clean Encoder ==="
-y, clean = encoder(inputs, 0.0) # 0.0 -> do not add noise
+y, clean = encoder(inputs, 0.0)  # 0.0 -> do not add noise
 
 print "=== Decoder ==="
+
 
 def g_gauss(z_c, u, size):
     "gaussian denoising function proposed in the original paper"
@@ -151,7 +166,7 @@ def g_gauss(z_c, u, size):
 
 # Decoder
 z_est = {}
-d_cost = [] # to store the denoising cost of all layers
+d_cost = []  # to store the denoising cost of all layers
 for l in range(L, -1, -1):
     print "Layer ", l, ": ", layer_sizes[l+1] if l+1 < len(layer_sizes) else None, " -> ", layer_sizes[l], ", denoising cost: ", denoising_cost[l]
     z, z_c = clean['unlabeled']['z'][l], corr['unlabeled']['z'][l]
@@ -170,12 +185,12 @@ for l in range(L, -1, -1):
 u_cost = tf.add_n(d_cost)
 
 y_N = labeled(y_c)
-cost = -tf.reduce_mean(tf.reduce_sum(outputs*tf.log(y_N), 1)) # supervised cost
-loss = cost + u_cost # total cost
+cost = -tf.reduce_mean(tf.reduce_sum(outputs*tf.log(y_N), 1))  # supervised cost
+loss = cost + u_cost  # total cost
 
-pred_cost = -tf.reduce_mean(tf.reduce_sum(outputs*tf.log(y), 1)) # cost used for prediction
+pred_cost = -tf.reduce_mean(tf.reduce_sum(outputs*tf.log(y), 1))  # cost used for prediction
 
-correct_prediction = tf.equal(tf.argmax(y, 1), tf.argmax(outputs, 1)) # no of correct predictions
+correct_prediction = tf.equal(tf.argmax(y, 1), tf.argmax(outputs, 1))  # no of correct predictions
 accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float")) * tf.constant(100.0)
 
 learning_rate = tf.Variable(starter_learning_rate, trainable=False)
@@ -187,7 +202,7 @@ with tf.control_dependencies([train_step]):
     train_step = tf.group(bn_updates)
 
 print "===  Loading Data ==="
-mnist = input_data.read_data_sets("MNIST_data", n_labeled = num_labeled, one_hot=True)
+mnist = input_data.read_data_sets("MNIST_data", n_labeled=num_labeled, one_hot=True)
 
 saver = tf.train.Saver()
 
@@ -196,7 +211,7 @@ sess = tf.Session()
 
 i_iter = 0
 
-ckpt = tf.train.get_checkpoint_state('checkpoints/') # get latest checkpoint (if any)
+ckpt = tf.train.get_checkpoint_state('checkpoints/')  # get latest checkpoint (if any)
 if ckpt and ckpt.model_checkpoint_path:
     # if checkpoint exists, restore the parameters and set epoch_n and i_iter
     saver.restore(sess, ckpt.model_checkpoint_path)
@@ -207,7 +222,7 @@ else:
     # no checkpoint exists. create checkpoints directory if it does not exist.
     if not os.path.exists('checkpoints'):
         os.makedirs('checkpoints')
-    init  = tf.initialize_all_variables()
+    init = tf.initialize_all_variables()
     sess.run(init)
 
 print "=== Training ==="
@@ -221,15 +236,15 @@ for i in tqdm(range(i_iter, num_iter)):
         if (epoch_n+1) >= decay_after:
             # decay learning rate
             # learning_rate = starter_learning_rate * ((num_epochs - epoch_n) / (num_epochs - decay_after))
-            ratio = 1.0 * (num_epochs - (epoch_n+1)) # epoch_n + 1 because learning rate is set for next epoch
+            ratio = 1.0 * (num_epochs - (epoch_n+1))  # epoch_n + 1 because learning rate is set for next epoch
             ratio = max(0, ratio / (num_epochs - decay_after))
             sess.run(learning_rate.assign(starter_learning_rate * ratio))
         saver.save(sess, 'checkpoints/model.ckpt', epoch_n)
         # print "Epoch ", epoch_n, ", Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs:mnist.test.labels, training: False}), "%"
-	with open('train_log', 'ab') as train_log:
+        with open('train_log', 'ab') as train_log:
             # write test accuracy to file "train_log"
             train_log_w = csv.writer(train_log)
-            log_i = [epoch_n] + sess.run([accuracy], feed_dict={inputs: mnist.test.images, outputs:mnist.test.labels, training: False})
+            log_i = [epoch_n] + sess.run([accuracy], feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels, training: False})
             train_log_w.writerow(log_i)
 
 print "Final Accuracy: ", sess.run(accuracy, feed_dict={inputs: mnist.test.images, outputs: mnist.test.labels, training: False}), "%"

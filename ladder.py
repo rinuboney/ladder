@@ -1,5 +1,4 @@
 import tensorflow as tf
-from tensorflow.python import control_flow_ops
 import input_data
 import math
 import os
@@ -46,7 +45,7 @@ noise_std = 0.3  # scaling factor for noise used in corrupted encoder
 # hyperparameters that denote the importance of each layer
 denoising_cost = [1000.0, 10.0, 0.10, 0.10, 0.10, 0.10, 0.10]
 
-join = lambda l, u: tf.concat(0, [l, u])
+join = lambda l, u: tf.concat([l, u], 0)
 labeled = lambda x: tf.slice(x, [0, 0], [batch_size, -1]) if x is not None else x
 unlabeled = lambda x: tf.slice(x, [batch_size, 0], [-1, -1]) if x is not None else x
 split_lu = lambda x: (labeled(x), unlabeled(x))
@@ -116,12 +115,12 @@ def encoder(inputs, noise_std):
             z = batch_normalization(z_pre, mean, var)
             # Instead of the above statement, the use of the following 2 statements containing a typo
             # consistently produces a 0.2% higher accuracy for unclear reasons.
-            # m_l, v_l = tf.nn.moments(z_pre_l, axes=[0])
-            # z = join(batch_normalization(z_pre_l, m_l, mean, var), batch_normalization(z_pre_u, mean, var))
+            #m_l, v_l = tf.nn.moments(z_pre_l, axes=[0])
+            #z = join(batch_normalization(z_pre_l, m_l, mean, var), batch_normalization(z_pre_u, mean, var))
             return z
 
         # perform batch normalization according to value of boolean "training" placeholder:
-        z = control_flow_ops.cond(training, training_batch_norm, eval_batch_norm)
+        z = tf.cond(training, training_batch_norm, eval_batch_norm)
 
         if l == L:
             # use softmax activation in output layer
@@ -222,7 +221,7 @@ else:
     # no checkpoint exists. create checkpoints directory if it does not exist.
     if not os.path.exists('checkpoints'):
         os.makedirs('checkpoints')
-    init = tf.initialize_all_variables()
+    init = tf.global_variables_initializer()
     sess.run(init)
 
 print "=== Training ==="

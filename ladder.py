@@ -115,8 +115,8 @@ def encoder(inputs, noise_std):
             z = batch_normalization(z_pre, mean, var)
             # Instead of the above statement, the use of the following 2 statements containing a typo
             # consistently produces a 0.2% higher accuracy for unclear reasons.
-            #m_l, v_l = tf.nn.moments(z_pre_l, axes=[0])
-            #z = join(batch_normalization(z_pre_l, m_l, mean, var), batch_normalization(z_pre_u, mean, var))
+            # m_l, v_l = tf.nn.moments(z_pre_l, axes=[0])
+            # z = join(batch_normalization(z_pre_l, m_l, mean, var), batch_normalization(z_pre_u, mean, var))
             return z
 
         # perform batch normalization according to value of boolean "training" placeholder:
